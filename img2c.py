@@ -5,7 +5,7 @@ import sys
 import glob
 import argparse
 import itertools
-from typing import List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 from collections import defaultdict
 
 from PIL import Image, ImageColor
@@ -156,22 +156,22 @@ def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
 		raise ProgramError("max colors should be between 2 and 6 (inclusive)")
 
 	expected = max_colors + int(transparency)
-	hsv_im: Image = img.convert("HSV")
-	colors = hsv_im.getcolors()
+	rgba_im: Image = img.convert("RGBA")
+	colors = rgba_im.getcolors()
 	if len(colors) > expected:
 		print(colors)
 		raise ProgramError(f"image has too many colors: expected {expected}, got {len(colors)}")
 
 	l_im: Image = img.convert("L")
-	rgba_im: Image = img.convert("RGBA")
+	hsv_im: Image = img.convert("HSV")
 	rem_colors = {c[1] for c in colors}
 	cdata = []
 	width = img.size[0]
-	for i, p in enumerate(hsv_im.getdata()):
+	for i, p in enumerate(rgba_im.getdata()):
 		if p in rem_colors:
 			rem_colors.remove(p)
 			xy = (i % width, i // width)
-			cdata.append(Colors.Color(rgba_im.getpixel(xy), p, l_im.getpixel(xy)))
+			cdata.append(Colors.Color(p, hsv_im.getpixel(xy), l_im.getpixel(xy)))
 		if not rem_colors:
 			break
 
@@ -230,6 +230,8 @@ def convert_tiles(img: Image, colors: Colors):
 
 	img = img.convert("RGBA")
 	ncolors = len(colors.colors)
+	if ncolors not in get_grays:
+		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
 	
 	for row in range(0, height, 8):
 		for col in range(0, width, 8):
@@ -257,6 +259,8 @@ def convert_sprites(img: Image, colors: Colors):
 
 	img = img.convert("RGBA")
 	ncolors = len(colors.colors)
+	if ncolors not in get_grays:
+		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
 	
 	for row in range(0, height, 16):
 		for col in range(0, width, 16):
@@ -295,6 +299,7 @@ def get_grays3(b: int, x: int, y: int) -> tuple:
 	return (b, b)
 
 get_grays = {
+	1: get_grays2,
 	2: get_grays2,
 	3: get_grays3,
 }
