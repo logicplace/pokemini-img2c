@@ -49,7 +49,7 @@ class Colors(NamedTuple):
 
 def main():
 	parser = argparse.ArgumentParser("img2h")
-	parser.add_argument("--output", "-o",
+	parser.add_argument("--output", "-o", default=".",
 		help="Output folder for .h files")
 	parser.add_argument("--base", "-b",
 		type=str2int, default=0x010000,
@@ -86,7 +86,7 @@ def main():
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites")
 			px_bands = convert(im, colors)
-			with open(f"{fname}.h", "w") as f:
+			with open(os.path.join(args.output, f"{fname}.h"), "w") as f:
 				f.write(
 					f"#ifndef __{name.upper()}_H__\n"
 					f"#define __{name.upper()}_H__\n\n"
