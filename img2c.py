@@ -290,7 +290,7 @@ def convert_sprites(img: Image, colors: Colors):
 
 
 def get_grays2(b: int, x: int, y: int) -> tuple:
-	return (b,)
+	return (1 if b == "t" else b,)
 
 def get_grays3(b: int, x: int, y: int) -> tuple:
 	if b == 1:
