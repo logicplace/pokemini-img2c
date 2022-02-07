@@ -229,7 +229,7 @@ def convert_tiles(img: Image, colors: Colors):
 	width, height = img.size
 
 	img = img.convert("RGBA")
-	ncolors = len(colors.colors)
+	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
 	
@@ -258,7 +258,7 @@ def convert_sprites(img: Image, colors: Colors):
 	width, height = img.size
 
 	img = img.convert("RGBA")
-	ncolors = len(colors.colors)
+	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
 	
@@ -299,7 +299,6 @@ def get_grays3(b: int, x: int, y: int) -> tuple:
 	return (b, b)
 
 get_grays = {
-	1: get_grays2,
 	2: get_grays2,
 	3: get_grays3,
 }
