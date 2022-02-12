@@ -41,7 +41,7 @@ py img2c.py rsc/*.png
 You'll need to update your project's Makefile to include the new objects.
  You can also include rules to generate them.
  Here's one using the rsc directory.
- It can't compile them to the src directory, though, unless you want to specify the new obj names manually...
+ It can't compile them to the src directory, though.
 
 ```makefile
 TOOLCHAIN_DIR := ../..
@@ -52,11 +52,10 @@ ASM_SOURCES = src/startup.asm # others...
 IMAGES = rsc/my_sprites.png rsc/my_tiles.png # others...
 
 OBJS = $(IMAGES:.png=.obj)
-CCFLAGS = -I"rsc\include"
 
 .SUFFIXES: .png
 .png.obj:
-    py img2c.py $<
+    py img2c.py -O src $<
 
 include $(TOOLCHAIN_DIR)/pm.mk
 ```

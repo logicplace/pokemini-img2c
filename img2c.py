@@ -52,6 +52,8 @@ def main():
 	parser = argparse.ArgumentParser("img2h")
 	parser.add_argument("--output", "-o", default="",
 		help="Output folder (Default is same as file)")
+	parser.add_argument("--output-headers", "-O", default="",
+		help="Output folder for header stubs (Default is same as --output)")
 	parser.add_argument("--base", default=".",
 		help="Base directory for your project (Default is cwd)")
 	parser.add_argument("--no-stdint", action="store_true",
@@ -72,6 +74,7 @@ def main():
 		sys.exit(1)
 
 	output = pathlib.Path(args.output)
+	output_h = pathlib.Path(args.output_headers) if args.output_headers else output
 
 	tiles = args.tiles + [t for t in args.imgs if pathlib.Path(t).stem.endswith("tiles")]
 	sprites = args.sprites + [s for s in args.imgs if pathlib.Path(s).stem.endswith("sprites")]
@@ -86,12 +89,14 @@ def main():
 			im_file = pathlib.Path(x)
 			name = im_file.stem
 			out = output / name if args.output else im_file.with_suffix("")
+			out_h = output_h / name if args.output_headers else out
 
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites")
 			px_bands = convert(im, colors)
 			
 			write_ieee695(n, out, args, px_bands)
+			write_h_stub(n, out_h, args, px_bands)
 
 
 def chunk(b: bytes, size: int):
@@ -265,7 +270,6 @@ def write_ieee695(mode, fn: pathlib.Path, args, px_bands):
 		for x in w:
 			f.write(x)
 	print(f"wrote {out}")
-	write_h_stub(mode, out, args, px_bands)
 
 
 def ieee695_str(s: str, context="String"):
