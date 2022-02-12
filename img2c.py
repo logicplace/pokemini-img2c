@@ -61,6 +61,8 @@ def main():
 		help="Sprites to convert")
 	parser.add_argument("--tiles", "-t", nargs="+", default=[],
 		help="Tiles to convert")
+	parser.add_argument("imgs", nargs="*", default=[],
+		help="Images to convert. Filenames must end in 'sprites' or 'tiles' before the extension")
 	args = parser.parse_args()
 
 	if args.colors not in [2, 3]:
@@ -69,7 +71,10 @@ def main():
 
 	output = pathlib.Path(args.output)
 
-	for n, l in [("tiles", args.tiles), ("sprites", args.sprites)]:
+	tiles = args.tiles + [t for t in args.imgs if pathlib.Path(t).stem.endswith("tiles")]
+	sprites = args.sprites + [s for s in args.imgs if pathlib.Path(s).stem.endswith("sprites")]
+
+	for n, l in [("tiles", tiles), ("sprites", sprites)]:
 		convert = {
 			"tiles": convert_tiles,
 			"sprites": convert_sprites,
@@ -93,7 +98,7 @@ def chunk(b: bytes, size: int):
 		yield reader.read(size)
 
 
-def get_var_name(mode, fn):
+def get_var_name(mode, fn: pathlib.Path):
 	name = fn.stem
 	return name if name.endswith(mode) else f"{name}_{mode}"
 
