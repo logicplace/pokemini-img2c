@@ -61,6 +61,8 @@ def main():
 	parser.add_argument("--colors", "--colours", "-c",
 		type=int, default=3,
 		help="Number of colors to support (Default: 3)")
+	parser.add_argument("--invert", "-N", action="store_true",
+		help="Invert the colors")
 	parser.add_argument("--sprites", "-s", nargs="+", default=[],
 		help="Sprites to convert")
 	parser.add_argument("--tiles", "-t", nargs="+", default=[],
@@ -93,8 +95,8 @@ def main():
 
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites")
-			px_bands = convert(im, colors)
-			
+			px_bands = convert(im, colors, args.invert)
+      
 			write_ieee695(n, out, args, px_bands)
 			write_h_stub(n, out_h, args, px_bands)
 
