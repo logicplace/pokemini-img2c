@@ -1,14 +1,15 @@
 #/usr/bin/env python3
-import os
 import re
 import sys
-import glob
+import pathlib
 import argparse
+import datetime
 import itertools
+from io import BytesIO
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from collections import defaultdict
 
-from PIL import Image, ImageColor
+from PIL import Image
 
 COMMENT = r"//.*|/\*[\s\S]*?\*/"
 
@@ -49,11 +50,10 @@ class Colors(NamedTuple):
 
 def main():
 	parser = argparse.ArgumentParser("img2h")
-	parser.add_argument("--output", "-o", default=".",
-		help="Output folder for .h files")
-	parser.add_argument("--base", "-b",
-		type=str2int, default=0x010000,
-		help="Base address to use (Default: 0x010000)")
+	parser.add_argument("--output", "-o", default="",
+		help="Output folder (Default is same as file)")
+	parser.add_argument("--base", default=".",
+		help="Base directory for your project (Default is cwd)")
 	parser.add_argument("--colors", "--colours", "-c",
 		type=int, default=3,
 		help="Number of colors to support (Default: 3)")
@@ -67,9 +67,7 @@ def main():
 		print("Only supports 2 or 3 colors atm", file=sys.stderr)
 		sys.exit(1)
 
-	base = args.base
-
-	# TODO: use read_h to find open blocks and etc
+	output = pathlib.Path(args.output)
 
 	for n, l in [("tiles", args.tiles), ("sprites", args.sprites)]:
 		convert = {
@@ -78,73 +76,222 @@ def main():
 		}[n]
 
 		for x in l:
-			# TODO: group tiles into blocks of 256, add base defines
-			# TODO: alignment
-			fname = os.path.splitext(x)[0]
-			name = os.path.basename(fname)
-			var_name = name if name.endswith(n) else f"{name}_{n}"
+			im_file = pathlib.Path(x)
+			name = im_file.stem
+			out = output / name if args.output else im_file.with_suffix("")
+
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites")
 			px_bands = convert(im, colors)
-			with open(os.path.join(args.output, f"{fname}.h"), "w") as f:
-				f.write(
-					f"#ifndef __{name.upper()}_H__\n"
-					f"#define __{name.upper()}_H__\n\n"
-					'#include "pm.h"\n'
-					'#include <stdint.h>\n\n'
+			
+			write_ieee695(n, out, args, px_bands)
+
+
+def chunk(b: bytes, size: int):
+	reader = BytesIO(b)
+	for _ in range(0, len(b), size):
+		yield reader.read(size)
+
+
+def get_var_name(mode, fn):
+	name = fn.stem
+	return name if name.endswith(mode) else f"{name}_{mode}"
+
+
+def write_ieee695(mode, fn: pathlib.Path, args, px_bands):
+	out = fn.with_suffix(".obj")
+	name = fn.stem
+	var_name = get_var_name(mode, fn)
+	with out.open("wb") as f:
+		# Module Begin, built for E0C88d, filename is {obj_fn}
+		f.write(b"\xe0\x06E0C88d")
+		obj_fn = str(out.relative_to(args.base).as_posix())
+		f.write(ieee695_str(obj_fn, "File path"))
+
+		# Address Description, 8 bit MAU, 3 bytes max AU, big endian
+		f.write(b"\xec\x08\x03\xcc")
+
+		# Make parts in order to address them...
+		now = datetime.datetime.utcnow()
+		mode_align = (64 if mode == "sprites" else 8).to_bytes(1, "big")
+		band_data = [
+			(
+				(i + 1),
+				(i + 1).to_bytes(1, "big"),
+				(i + 0x20).to_bytes(1, "big"),
+				len(band),
+				ieee695_int(len(band)),
+				bytes(band),
+			)
+			for i, band in enumerate(px_bands)
+		]
+
+		w = [
+			# ASW0 - AD Extension Record
+			(
+				ieee695_co(0x25, "Object version: 1.1")
+				+ ieee695_co(0x26, "Object format: Relocatable")
+			),
+			# ASW1 - Environmental record
+			(
+				# Date record
+				b"\xeb"
+				+ ieee695_int(now.year)
+				+ ieee695_int(now.month)
+				+ ieee695_int(now.day)
+				+ ieee695_int(now.hour)
+				+ ieee695_int(now.minute)
+				+ ieee695_int(now.second)
+				# TODO: Can we be honest in these?
+				+ ieee695_co(0x35, "WINDOWS")
+				+ ieee695_co(0x36, "E0C88 assembler (061)")
+			),
+			# ASW2 - Section part
+			b"".join([
+				(
+					# Section Type, index, modes R Y4 C, name
+					# Read-only, addressing mode 4, cumulative
+					b"\xe6" + ib1 + b"\xD2\xD9\x04\xC3"
+					+ ieee695_str(f".pm{mode}{i:05d}")
+					# Section alignment, index, align by mode
+					+ b"\xe7" + ib1 + mode_align
+					# Section size, index, size in MAUs
+					+ b"\xe2\xd3" + ib1
+					+ len_band_int
 				)
+				for i, ib1, _, _, len_band_int, _ in band_data
+			]),
+			# ASW3 - External part
+			b"".join([
+				(
+					# Internal(?) Name, index, name
+					b"\xe8" + ib20
+					+ ieee695_str(f"_{var_name}{i}")
+					# Attribute, index, unspecified type, count
+					+ b"\xf1\xc9" + ib20 + b"\x00"
+					+ b"\x81\x84"  # ??? seems fixed
+					# Assign value record, index, R{i}
+					+ b"\xe2\xc9" + ib20
+					+ b"\xd2" + ib1
+				)
+				for i, ib1, ib20, _, _, _ in band_data
+			]),
+			# ASW4 - Debug information definition part
+			(
+				# Scope definitions
+				# Note: official tools have 0 block size for all but 11
+				# unique typedefs for module
+				ieee695_sc(1, ieee695_str(name) + b"\xf9")
+				# high level module scope beginning
+				+ ieee695_sc(3, ieee695_str(name) + b"\xf9")
+				# assembler module scope beginning, empty string, tool type 0
+				+ ieee695_sc(10, ieee695_str(name) + b"\x00\x00")
+				# module section
+				+ b"".join([
+					ieee695_sc(11, (
+						# name, type = read-only, index, R{i}
+						ieee695_str(f".pm{mode}{i:05d}")
+						+ b"\x03" + ib1 + b"\xd2" + ib1
+						# size
+						+ b"\xf9" + len_band_int
+					))
+					for i, ib1, _, _, len_band_int, _ in band_data
+				])
+				+ b"\xf9"
+			),
+			# ASW5 - Data part
+			b"".join([
+				# Section begin, index
+				b"\xe5" + ib1
+				# Assign program pointer, index, value (R{i})
+				+ b"\xe2\xd0" + ib1 + b"\xd2" + ib1
+				# Load data, size in MAUs (1-127), data
+				+ b"".join([
+					b"\xed"
+					+ len(data).to_bytes(1, "big")
+					+ data[::-1]
+					for data in chunk(band, 127)
+				])
+				for _, ib1, _, _, _, band in band_data
+			]),
+			# ASW6 - Trailing part (unused)
+			b"",
+			# ASW7 - Module end part
+			b"\xe1"
+		]
 
-				for i, band in enumerate(px_bands):
-					len_band = len(band)
-					f.write(f"const uint8_t _rom {var_name}{i+1}[{len_band}] _at(0x{base:06x}) = {{\n")
-					for i in range(0, len_band, 8):
-						line = ", ".join(f"0x{px:02x}" for px in band[i:i+8])
-						f.write(f"\t{line},\n")
-					f.write("};\n\n")
-					base += len_band
-				
-				f.write(f"#endif // __{name.upper()}_H__\n")
-			print(f"wrote {fname}.h")
+		# Finish header
+		# TODO: test if can be compressed
+		header_size = f.tell() + 8 * 8
+		next_offset = header_size
+		for i, x in enumerate(w):
+			f.write(
+				b"\xe2\xd7" + i.to_bytes(1, "big")
+				+ ieee695_int(next_offset if x else 0, size=4)
+			)
+			next_offset += len(x)
+
+		# Write parts
+		for x in w:
+			f.write(x)
+	print(f"wrote {out}")
 
 
-def str2int(s: str, c=False):
-	if s.startswith("0x"):
-		return int(s[2:], 16)
-	elif s.startswith("$"):
-		return int(s[1:], 16)
-	elif s.startswith("0b"):
-		return int(s[2:], 2)
-	elif c and s.startswith("0"):
-		return int(s, 8)
-	return int(s)
+def ieee695_str(s: str, context="String"):
+	assert len(s) < 0x80, f'{context} "{s}" is too long.'
+	return len(s).to_bytes(1, "big") + s.encode("ascii")
 
 
-def read_h(path: str):
-	times = {}
-	filled = []
-	for hfn in glob.glob(os.path.join(path, "*.h")):
-		name = os.path.basename(hfn)[:-2]
-		times[name] = os.path.getmtime(hfn)
-		with open(hfn) as f:
-			ats = AT_PATTERN.findall(f.read())
-		for count, address, contents in ats:
-			if not count:
-				values = REMOVE_COMMENTS.sub("", contents).split(",")
-				count = len(values)
-				if not values[-1].strip():
-					count -= 1
-			filled.append((address, count))
-	filled.sort()
-	prev = filled[0]
-	ret = []
-	for x in filled[1:]:
-		if sum(prev) >= x[0]:
-			# TODO: warn on >
-			prev = (prev[0], prev[1] + x[1])
-		else:
-			ret.append(prev)
-			prev = x
-	return ret
+def ieee695_int(i: int, context="Number", *, size=0):
+	if not (0 <= size <= 4):
+		raise ValueError("size must be between 0 and 4")
+
+	if size == 0 and 0 <= i < 0x80:
+		return i.to_bytes(1, "big")
+
+	assert i < 0x8000_0000, f'{context} "{i}" is too large.'
+
+	if not size:
+		if i < 0 or i & 0xff000000:
+			size = 4
+		elif i & 0x00ff0000:
+			size = 3
+		elif i & 0x0000ff00:
+			size = 2
+		elif i & 0x000000ff:
+			size = 1
+	elif i < 0 and size != 4:
+		raise ValueError("signed numbers must be size=4")
+
+	return (
+		(0x80 | size).to_bytes(1, "big")
+		+ i.to_bytes(size, "big", signed=i < 0)
+	)
+
+
+def ieee695_co(level: int, comment: str):
+	return (
+		b"\xea"
+		+ level.to_bytes(1, "little")
+		+ ieee695_str(comment, "Comment")
+	)
+
+
+def ieee695_sc(block: int, content: str):
+	# Final block size contains all but the F8
+	len_content = len(content)
+	len_len = 1
+	as_int = ieee695_int(len_content + 1 + len_len)
+	while len(as_int) > len_len:
+		len_len = len(as_int)
+		as_int = ieee695_int(len_content + 1 + len_len)
+
+	return (
+		b"\xf8"
+		+ block.to_bytes(1, "little")
+		+ as_int
+		+ content
+	)
 
 
 def rgb(hex):
