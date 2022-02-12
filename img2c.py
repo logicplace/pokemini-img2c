@@ -54,6 +54,8 @@ def main():
 		help="Output folder (Default is same as file)")
 	parser.add_argument("--base", default=".",
 		help="Base directory for your project (Default is cwd)")
+	parser.add_argument("--no-stdint", action="store_true",
+		help="Don't use stdint when generating header stubs")
 	parser.add_argument("--colors", "--colours", "-c",
 		type=int, default=3,
 		help="Number of colors to support (Default: 3)")
@@ -101,6 +103,29 @@ def chunk(b: bytes, size: int):
 def get_var_name(mode, fn: pathlib.Path):
 	name = fn.stem
 	return name if name.endswith(mode) else f"{name}_{mode}"
+
+
+def write_h_stub(mode, fn: pathlib.Path, args, px_bands):
+	out = fn.with_suffix(".h")
+	name = fn.stem.upper()
+	var_name = get_var_name(mode, fn)
+	with out.open("wt") as f:
+		f.write(
+			f"#ifndef {name}_H\n"
+			f"#define {name}_H\n\n"
+			+ (
+				"extern unsigned char "
+				if args.no_stdint else
+				"#include <stdint.h>\n\nextern uint8_t "
+			)
+			+ ", ".join([
+				f"{var_name}{i}[]"
+				for i in range(1, len(px_bands) + 1)
+			])
+			+ ";\n\n"
+			f"#endif // {name}_H\n"
+		)
+	print(f"wrote {out}")
 
 
 def write_ieee695(mode, fn: pathlib.Path, args, px_bands):
@@ -240,6 +265,7 @@ def write_ieee695(mode, fn: pathlib.Path, args, px_bands):
 		for x in w:
 			f.write(x)
 	print(f"wrote {out}")
+	write_h_stub(mode, out, args, px_bands)
 
 
 def ieee695_str(s: str, context="String"):
