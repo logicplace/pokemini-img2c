@@ -396,9 +396,9 @@ def identify_colors(img: Image, max_colors: int, transparency: bool, invert: boo
 		cdata.remove(transparent)
 
 	if invert:
-		cdata.sort(key=lambda x: -x.l)
-	else:
 		cdata.sort(key=lambda x: x.l)
+	else:
+		cdata.sort(key=lambda x: -x.l)
 
 	return Colors(cdata, transparent)
 
@@ -483,7 +483,7 @@ def get_grays2(b: int, x: int, y: int) -> tuple:
 def get_grays3(b: int, x: int, y: int) -> tuple:
 	if b == 1:
 		return (0, 1) if (x + y) % 2 else (1, 0)
-	b = 0 if b else 1
+	b = 1 if b else 0
 	return (b, b)
 
 get_grays = {

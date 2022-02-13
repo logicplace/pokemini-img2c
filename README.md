@@ -44,19 +44,18 @@ You'll need to update your project's Makefile to include the new objects.
  It can't compile them to the src directory, though.
 
 ```makefile
-TOOLCHAIN_DIR := ../..
 TARGET = my_project
 
-C_SOURCES = src/isr.c src/main.c # others...
-ASM_SOURCES = src/startup.asm # others...
+C_SOURCES = src\isr.c src\main.c # others...
+ASM_SOURCES = src\startup.asm # others...
 IMAGES = rsc/my_sprites.png rsc/my_tiles.png # others...
 
 OBJS = $(IMAGES:.png=.obj)
 
+include ../../pm.mk
+
 .SUFFIXES: .png
 .png.obj:
     py img2c.py -O src $<
-
-include $(TOOLCHAIN_DIR)/pm.mk
 ```
 
