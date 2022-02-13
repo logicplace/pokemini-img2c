@@ -94,8 +94,8 @@ def main():
 			out_h = output_h / name if args.output_headers else out
 
 			im = Image.open(x)
-			colors = identify_colors(im, args.colors, n == "sprites")
-			px_bands = convert(im, colors, args.invert)
+			colors = identify_colors(im, args.colors, n == "sprites", args.invert)
+			px_bands = convert(im, colors)
       
 			write_ieee695(n, out, args, px_bands)
 			write_h_stub(n, out_h, args, px_bands)
@@ -335,7 +335,7 @@ def rgb(hex):
 	return (hex >> 16, (hex >> 8) & 0xff, hex & 0xff)
 
 
-def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
+def identify_colors(img: Image, max_colors: int, transparency: bool, invert: bool) -> Colors:
 	if max_colors < 2 or max_colors > 6:
 		raise ProgramError("max colors should be between 2 and 6 (inclusive)")
 
@@ -394,7 +394,11 @@ def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
 	# Sort remaining colors by lightness
 	if transparent is not None:
 		cdata.remove(transparent)
-	cdata.sort(key=lambda x: x.l)
+
+	if invert:
+		cdata.sort(key=lambda x: -x.l)
+	else:
+		cdata.sort(key=lambda x: x.l)
 
 	return Colors(cdata, transparent)
 
