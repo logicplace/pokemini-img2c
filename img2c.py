@@ -9,7 +9,7 @@ from io import BytesIO
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from collections import defaultdict
 
-from PIL import Image, ImageOps
+from PIL import Image
 
 COMMENT = r"//.*|/\*[\s\S]*?\*/"
 
@@ -408,14 +408,11 @@ def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
 	# }
 
 
-def convert_tiles(img: Image, colors: Colors, invert: bool):
+def convert_tiles(img: Image, colors: Colors):
 	pixels = []
 	width, height = img.size
 
 	img = img.convert("RGBA")
-	if invert:
-		img = img.convert("RGB")
-		img = ImageOps.invert(img).convert("RGBA")
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
@@ -439,15 +436,12 @@ def convert_tiles(img: Image, colors: Colors, invert: bool):
 	return tuple(zip(*pixels))
 
 
-def convert_sprites(img: Image, colors: Colors, invert: bool):
+def convert_sprites(img: Image, colors: Colors):
 	# Format: UL mask, LL mask, UL, LL, UR mask, LR mask, UR, LR
 	pixels = []
 	width, height = img.size
 
 	img = img.convert("RGBA")
-	if invert:
-		img = img.convert("RGB")
-		img = ImageOps.invert(img).convert("RGBA")
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
