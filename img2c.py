@@ -61,6 +61,8 @@ def main():
 	parser.add_argument("--colors", "--colours", "-c",
 		type=int, default=3,
 		help="Number of colors to support (Default: 3)")
+	parser.add_argument("--invert", "-N", action="store_true",
+		help="Invert the colors")
 	parser.add_argument("--sprites", "-s", nargs="+", default=[],
 		help="Sprites to convert")
 	parser.add_argument("--tiles", "-t", nargs="+", default=[],
@@ -92,9 +94,9 @@ def main():
 			out_h = output_h / name if args.output_headers else out
 
 			im = Image.open(x)
-			colors = identify_colors(im, args.colors, n == "sprites")
+			colors = identify_colors(im, args.colors, n == "sprites", args.invert)
 			px_bands = convert(im, colors)
-			
+
 			write_ieee695(n, out, args, px_bands)
 			write_h_stub(n, out_h, args, px_bands)
 
@@ -333,7 +335,7 @@ def rgb(hex):
 	return (hex >> 16, (hex >> 8) & 0xff, hex & 0xff)
 
 
-def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
+def identify_colors(img: Image, max_colors: int, transparency: bool, invert: bool) -> Colors:
 	if max_colors < 2 or max_colors > 6:
 		raise ProgramError("max colors should be between 2 and 6 (inclusive)")
 
@@ -368,7 +370,7 @@ def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
 				break
 			elif c.hsv[1]:
 				have_sat.append(c)
-		
+
 		if transparent is None:
 			if len(have_sat) == 1:
 				# Everything was grayscale
@@ -388,11 +390,15 @@ def identify_colors(img: Image, max_colors: int, transparency: bool) -> Colors:
 				if most_distinct_hue > 5:
 					transparent = hues[most_distinct_hue]
 				# else assume no transparency
-	
+
 	# Sort remaining colors by lightness
 	if transparent is not None:
 		cdata.remove(transparent)
-	cdata.sort(key=lambda x: x.l)
+
+	if invert:
+		cdata.sort(key=lambda x: x.l)
+	else:
+		cdata.sort(key=lambda x: -x.l)
 
 	return Colors(cdata, transparent)
 
@@ -414,7 +420,7 @@ def convert_tiles(img: Image, colors: Colors):
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
-	
+
 	for row in range(0, height, 8):
 		for col in range(0, width, 8):
 			for x in range(col, col + 8):
@@ -429,7 +435,7 @@ def convert_tiles(img: Image, colors: Colors):
 					for i, gray in enumerate(grays):
 						pxs[i] |= gray << (y - row)
 				pixels.append(pxs)
-	
+
 	# Return as bands
 	return tuple(zip(*pixels))
 
@@ -443,7 +449,7 @@ def convert_sprites(img: Image, colors: Colors):
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
-	
+
 	for row in range(0, height, 16):
 		for col in range(0, width, 16):
 			for x_segment in range(col, col + 16, 8):
@@ -458,7 +464,7 @@ def convert_sprites(img: Image, colors: Colors):
 							shift = y - y_segment
 							if idx == "t":
 								mask |= 1 << shift
-							
+
 							grays = get_grays[ncolors](idx, x, y)
 							for i, gray in enumerate(grays):
 								pxs[i] |= gray << shift
@@ -466,7 +472,7 @@ def convert_sprites(img: Image, colors: Colors):
 						segment.append(pxs)
 				pixels.extend(segment)
 
-	
+
 	# Return as bands
 	return tuple(zip(*pixels))
 
@@ -477,7 +483,7 @@ def get_grays2(b: int, x: int, y: int) -> tuple:
 def get_grays3(b: int, x: int, y: int) -> tuple:
 	if b == 1:
 		return (0, 1) if (x + y) % 2 else (1, 0)
-	b = 0 if b else 1
+	b = 1 if b else 0
 	return (b, b)
 
 get_grays = {
