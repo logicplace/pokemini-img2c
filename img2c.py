@@ -96,7 +96,7 @@ def main():
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites", args.invert)
 			px_bands = convert(im, colors)
-      
+
 			write_ieee695(n, out, args, px_bands)
 			write_h_stub(n, out_h, args, px_bands)
 
@@ -370,7 +370,7 @@ def identify_colors(img: Image, max_colors: int, transparency: bool, invert: boo
 				break
 			elif c.hsv[1]:
 				have_sat.append(c)
-		
+
 		if transparent is None:
 			if len(have_sat) == 1:
 				# Everything was grayscale
@@ -390,7 +390,7 @@ def identify_colors(img: Image, max_colors: int, transparency: bool, invert: boo
 				if most_distinct_hue > 5:
 					transparent = hues[most_distinct_hue]
 				# else assume no transparency
-	
+
 	# Sort remaining colors by lightness
 	if transparent is not None:
 		cdata.remove(transparent)
@@ -420,7 +420,7 @@ def convert_tiles(img: Image, colors: Colors):
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
-	
+
 	for row in range(0, height, 8):
 		for col in range(0, width, 8):
 			for x in range(col, col + 8):
@@ -435,7 +435,7 @@ def convert_tiles(img: Image, colors: Colors):
 					for i, gray in enumerate(grays):
 						pxs[i] |= gray << (y - row)
 				pixels.append(pxs)
-	
+
 	# Return as bands
 	return tuple(zip(*pixels))
 
@@ -449,7 +449,7 @@ def convert_sprites(img: Image, colors: Colors):
 	ncolors = max(len(colors.colors), 2)
 	if ncolors not in get_grays:
 		raise ProgramError(f"Found unacceptible number of colors: {ncolors}\n{colors.colors}")
-	
+
 	for row in range(0, height, 16):
 		for col in range(0, width, 16):
 			for x_segment in range(col, col + 16, 8):
@@ -464,7 +464,7 @@ def convert_sprites(img: Image, colors: Colors):
 							shift = y - y_segment
 							if idx == "t":
 								mask |= 1 << shift
-							
+
 							grays = get_grays[ncolors](idx, x, y)
 							for i, gray in enumerate(grays):
 								pxs[i] |= gray << shift
@@ -472,7 +472,7 @@ def convert_sprites(img: Image, colors: Colors):
 						segment.append(pxs)
 				pixels.extend(segment)
 
-	
+
 	# Return as bands
 	return tuple(zip(*pixels))
 
