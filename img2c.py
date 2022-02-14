@@ -47,6 +47,9 @@ class Colors(NamedTuple):
 				return i
 		return "t"
 
+	def __len__(self) -> int:
+		return len(self.colors) + int(bool(self.transparent))
+
 
 def main():
 	parser = argparse.ArgumentParser("img2h")
@@ -67,6 +70,8 @@ def main():
 		help="Sprites to convert")
 	parser.add_argument("--tiles", "-t", nargs="+", default=[],
 		help="Tiles to convert")
+	parser.add_argument("--debug", "-D", action="store_true",
+		help="Output a randomized color palette version of the image(s) in order to highlight issues")
 	parser.add_argument("imgs", nargs="*", default=[],
 		help="Images to convert. Filenames must end in 'sprites' or 'tiles' before the extension")
 	args = parser.parse_args()
@@ -95,10 +100,16 @@ def main():
 
 			im = Image.open(x)
 			colors = identify_colors(im, args.colors, n == "sprites", args.invert)
-			px_bands = convert(im, colors)
+			if args.debug:
+				out_im = random_redraw(im, colors)
+				out = out.with_name(out.stem + "_randomized").with_suffix(".png")
+				with out.open("wb") as f:
+					out_im.save(f)
+			else:
+				px_bands = convert(im, colors)
 
-			write_ieee695(n, out, args, px_bands)
-			write_h_stub(n, out_h, args, px_bands)
+				write_ieee695(n, out, args, px_bands)
+				write_h_stub(n, out_h, args, px_bands)
 
 
 def chunk(b: bytes, size: int):
@@ -331,11 +342,38 @@ def ieee695_sc(block: int, content: str):
 	)
 
 
+def random_redraw(im: Image.Image, colors: Colors):
+	# Select distinct colors
+	import random
+	distinct = [
+		# https://stackoverflow.com/a/4382138
+		0xFFB300, # Vivid Yellow
+		0x803E75, # Strong Purple
+		0xFF6800, # Vivid Orange
+		0xA6BDD7, # Very Light Blue
+		0xC10020, # Vivid Red
+		0xCEA262, # Grayish Yellow
+		0x817066, # Medium Gray
+	]
+	selected = [
+		(x >> 16, (x >> 8) & 0xff, x & 0xff)
+		for x in random.sample(distinct, len(colors))
+	]
+
+	out = im.convert("RGBA")
+	out.putdata([
+		selected[-1 if idx == "t" else idx]
+		for px in out.getdata()
+		for idx in [colors.get(px)]
+	])
+	return out
+
+
 def rgb(hex):
 	return (hex >> 16, (hex >> 8) & 0xff, hex & 0xff)
 
 
-def identify_colors(img: Image, max_colors: int, transparency: bool, invert: bool) -> Colors:
+def identify_colors(img: Image.Image, max_colors: int, transparency: bool, invert: bool) -> Colors:
 	if max_colors < 2 or max_colors > 6:
 		raise ProgramError("max colors should be between 2 and 6 (inclusive)")
 
@@ -412,7 +450,7 @@ def identify_colors(img: Image, max_colors: int, transparency: bool, invert: boo
 	# }
 
 
-def convert_tiles(img: Image, colors: Colors):
+def convert_tiles(img: Image.Image, colors: Colors):
 	pixels = []
 	width, height = img.size
 
