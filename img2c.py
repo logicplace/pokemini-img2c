@@ -181,7 +181,7 @@ def write_ieee695(mode, fn: pathlib.Path, args, px_bands, memory_model="l"):
 		f.write(b"\xec\x08\x03\xcc")
 
 		# Make parts in order to address them...
-		now = datetime.datetime.now(datetime.UTC)
+		now = datetime.datetime.now(datetime.timezone.UTC)
 		mode_align = (64 if mode == "sprites" else 8).to_bytes(1, "big")
 		band_data = [
 			(
