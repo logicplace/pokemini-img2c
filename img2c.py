@@ -1,12 +1,12 @@
 #/usr/bin/env python3
+import math
 import re
 import sys
-import string
 import pathlib
 import argparse
 import datetime
 import itertools
-from io import BytesIO
+from io import BytesIO, TextIOWrapper
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from collections import defaultdict
 
@@ -50,10 +50,24 @@ class Colors(NamedTuple):
 
 	def __len__(self) -> int:
 		return len(self.colors) + int(bool(self.transparent))
+	
+
+class Options(NamedTuple):
+	memory_model: str
+	base: pathlib.Path = pathlib.Path(".")
+
+	# obj
+	load_size: int = 0
+
+	# asm
+	sect_type: str = "DATA"
+
+	# C
+	use_stdint: bool = True
 
 
 def main():
-	parser = argparse.ArgumentParser("img2h")
+	parser = argparse.ArgumentParser("img2c")
 	parser.add_argument("--output", "-o", default="",
 		help="Output folder (Default is same as file)")
 	parser.add_argument("--output-headers", "-O", default="",
@@ -63,11 +77,20 @@ def main():
 	parser.add_argument("--no-stdint", action="store_true",
 		help="Don't use stdint when generating header stubs")
 	outfmt = parser.add_mutually_exclusive_group()
+
+	# IEEE695 options
 	outfmt.add_argument("--obj", action="store_true",
 		help="Output IEEE695 object format (default)")
+	parser.add_argument("--load-size", default=127,
+		help="Size used for Load Constant Bytes command (1~127)")
+
+	# Assembler options
 	outfmt.add_argument("--asm", "-a", action="store_true",
 		help="Output assembler file")
-	parser.add_argument("--memory-model", "-M", default="d",
+	parser.add_argument("--no-scaffolding", "-S", action="store_true",
+		help="Only export image data, no section information")
+
+	parser.add_argument("--memory-model", "-M", default="",
 		help="Memory model to use for output")
 	# parser.add_argument("--data", action="store_true",
 	# 	help="Output as DATA section type instead of CODE (for instance, when using -Mc)")
@@ -91,9 +114,19 @@ def main():
 		sys.exit(1)
 
 	mem_model: str = args.memory_model.lower()
-	if mem_model not in tuple("scdl"):
-		print("Memory model must be S, C, D, or L", file=sys.stderr)
-		sys.exit(1)
+	if mem_model:
+		if mem_model not in tuple("scdl"):
+			print("Memory model must be S, C, D, or L", file=sys.stderr)
+			sys.exit(1)
+	elif not args.asm:
+		mem_model = "d"  # d is default for --obj
+
+	opts = Options(
+		base=pathlib.Path(args.base),
+		memory_model=mem_model,
+		load_size=args.load_size,
+		use_stdint=not args.no_stdint,
+	)
 
 	output = pathlib.Path(args.output)
 	output_h = pathlib.Path(args.output_headers) if args.output_headers else output
@@ -123,12 +156,15 @@ def main():
 			else:
 				px_bands = convert(im, colors)
 
-				outargs = (n, out, args, px_bands, mem_model)
+				outargs = (n, out, px_bands, opts)
 				if args.asm:
-					write_asm(*outargs)
+					if args.no_scaffolding:
+						write_datafile_asm(*outargs)
+					else:
+						write_asm(*outargs)
 				else:
 					write_ieee695(*outargs)
-				write_h_stub(n, out_h, args, px_bands)
+				write_h_stub(n, out_h, px_bands, opts)
 
 
 def chunk(b: bytes, size: int):
@@ -142,7 +178,7 @@ def get_var_name(mode, fn: pathlib.Path):
 	return name if name.endswith(mode) else f"{name}_{mode}"
 
 
-def write_h_stub(mode, fn: pathlib.Path, args, px_bands):
+def write_h_stub(mode, fn: pathlib.Path, px_bands, opts = Options("")):
 	out = fn.with_suffix(".h")
 	name = fn.stem.upper()
 	var_name = get_var_name(mode, fn)
@@ -151,9 +187,9 @@ def write_h_stub(mode, fn: pathlib.Path, args, px_bands):
 			f"#ifndef {name}_H\n"
 			f"#define {name}_H\n\n"
 			+ (
-				"extern const _far unsigned char "
-				if args.no_stdint else
 				"#include <stdint.h>\n\nextern const _far uint8_t "
+				if opts.use_stdint else
+				"extern const _far unsigned char "
 			)
 			+ ", ".join([
 				f"{var_name}{i}[]"
@@ -165,16 +201,16 @@ def write_h_stub(mode, fn: pathlib.Path, args, px_bands):
 	print(f"wrote {out}")
 
 
-def write_ieee695(mode, fn: pathlib.Path, args, px_bands, memory_model="l"):
+def write_ieee695(mode, fn: pathlib.Path, px_bands, opts = Options("l")):
 	out = fn.with_suffix(".obj")
 	name = fn.stem
 	var_name = get_var_name(mode, fn)
 	with out.open("wb") as f:
-		# Module Begin, built for E0C88d, filename is {obj_fn}
-		memory_model = memory_model.lower()
+		# Module Begin, built for E0C88, memory model specifier, filename is {obj_fn}
+		memory_model = opts.memory_model.lower()
 		assert memory_model in tuple("scdl")
 		f.write(b"\xe0\x06E0C88" + memory_model.encode("ascii"))
-		obj_fn = str(out.relative_to(args.base).as_posix())
+		obj_fn = str(out.relative_to(opts.base).as_posix())
 		f.write(ieee695_str(obj_fn, "File path"))
 
 		# Address Description, 8 bit MAU, 3 bytes max AU, big endian
@@ -278,9 +314,9 @@ def write_ieee695(mode, fn: pathlib.Path, args, px_bands, memory_model="l"):
 				# Load data, size in MAUs (1-127), data
 				+ b"".join([
 					b"\xed"
-					+ len(data).to_bytes(1, "big")
+					+ ieee695_int(len(data))
 					+ data[::-1]
-					for data in chunk(band, 127)
+					for data in chunk(band, opts.load_size or len(band))
 				])
 				for _, ib1, _, _, _, band in band_data
 			]),
@@ -364,7 +400,7 @@ def ieee695_sc(block: int, content: str):
 	)
 
 
-def write_asm(mode, fn: pathlib.Path, args, px_bands, memory_model="", sect_type="DATA"):
+def write_asm(mode, fn: pathlib.Path, px_bands, opts = Options("")):
 	out = fn.with_suffix(".src")
 	var_name = get_var_name(mode, fn)
 	mode_align = 64 if mode == "sprites" else 8
@@ -374,8 +410,9 @@ def write_asm(mode, fn: pathlib.Path, args, px_bands, memory_model="", sect_type
 			"; Generated by img2c\n\n"
 			"$CASE ON\n"
 		)
+
 		if memory_model:
-			memory_model = memory_model.upper()
+			memory_model = opts.memory_model.upper()
 			assert memory_model in tuple("SCDL")
 			f.write(f"$MODEL {memory_model}\n")
 		for i, band in enumerate(px_bands):
@@ -383,22 +420,35 @@ def write_asm(mode, fn: pathlib.Path, args, px_bands, memory_model="", sect_type
 			sect = f".pm{mode}{i:05d}"
 			label = f"_{var_name}{i}"
 			f.write(
-				f"\n\tDEFSECT '{sect}', {sect_type}, ROMDATA, FIT 10000H\n"
+				f"\n\tDEFSECT '{sect}', {opts.sect_type}, ROMDATA, FIT 10000H\n"
 				f"\tSECT    '{sect}'\n"
 				f"\tALIGN   {mode_align}\n"
 				f"{label}:\n"
 			)
 
-			# Stylized this a bit like the official graphics utility
-			# But that also names tiles and doesn't write section info
-			for data in chunk(bytes(band), mode_align):
-				f.write(f"\tDB ")
-				f.write(",".join(as88_hex_byte(x) for x in data))
-				f.write("\n")
+			write_asm_db(f, band, mode_align)
 			
 			f.write(f"\n\tGLOBAL {label}\n")
 		f.write("\tEND\n")
 	print(f"wrote {out}")
+
+
+def write_datafile_asm(mode, fn: pathlib.Path, px_bands, opts = Options("")):
+	mode_align = 64 if mode == "sprites" else 8
+
+	for i, band in enumerate(px_bands):
+		out = fn.with_name(f"{fn.stem}{i}.src")
+		with out.open("wt", encoding="ascii") as f:
+			write_asm_db(f, band, mode_align)
+
+
+def write_asm_db(f: TextIOWrapper, band, mode_align: int):
+	# Stylized this a bit like the official graphics utility
+	# But that also names tiles and doesn't write section info
+	for data in chunk(bytes(band), mode_align):
+		f.write(f"\tDB ")
+		f.write(",".join(as88_hex_byte(x) for x in data))
+		f.write("\n")
 
 
 def as88_hex_byte(n: int):
@@ -516,6 +566,10 @@ def identify_colors(img: Image.Image, max_colors: int, transparency: bool, inver
 def convert_tiles(img: Image.Image, colors: Colors):
 	pixels = []
 	width, height = img.size
+	if width % 8 or height % 8:
+		try_width = math.ceil(width / 8) * 8
+		try_height = math.ceil(height / 8) * 8
+		raise ProgramError(f"Tilesheet must be some multiple of 8x8. Maybe you meant to make it {try_width}x{try_height}?")
 
 	img = img.convert("RGBA")
 	ncolors = max(len(colors.colors), 2)
@@ -545,6 +599,10 @@ def convert_sprites(img: Image, colors: Colors):
 	# Format: UL mask, LL mask, UL, LL, UR mask, LR mask, UR, LR
 	pixels = []
 	width, height = img.size
+	if width % 16 or height % 16:
+		try_width = math.ceil(width / 16) * 16
+		try_height = math.ceil(height / 16) * 16
+		raise ProgramError(f"Spritesheet must be some multiple of 8x8. Maybe you meant to make it {try_width}x{try_height}?")
 
 	img = img.convert("RGBA")
 	ncolors = max(len(colors.colors), 2)
@@ -594,4 +652,6 @@ get_grays = {
 
 
 if __name__ == "__main__":
-	main()
+	try: main()
+	except ProgramError as e:
+		print(e.args[0], file=sys.stderr)
